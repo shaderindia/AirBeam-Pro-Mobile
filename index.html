@@ -11,12 +11,14 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
 
-    <!-- Tailwind CSS -->
+    <!-- Tailwind CSS (CDN kept for web; Android WebView loads from cache or online) -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Local fallback deps for offline/hotspot mode -->
+    <script>if(typeof tailwind==='undefined')document.write('<scr'+'ipt src="lib/tailwind-stub.js"><\/scr'+'ipt>')</script>
     <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="lib/lucide.min.js" onerror="this.src='https://unpkg.com/lucide@latest/dist/umd/lucide.min.js'"></script>
     <!-- PeerJS for WebRTC -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="lib/peerjs.min.js" onerror="this.src='https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js'"></script>
 
     <script>
         tailwind.config = {
@@ -73,7 +75,7 @@
                 </div>
                 <div class="text-left">
                     <h3 class="font-bold text-white text-base">Send Files</h3>
-                    <p class="text-xs text-slate-400">Turn on Hotspot & host transfer</p>
+                    <p class="text-xs text-slate-400">Generate PIN & share files</p>
                 </div>
             </button>
 
@@ -83,7 +85,7 @@
                 </div>
                 <div class="text-left">
                     <h3 class="font-bold text-white text-base">Receive Files</h3>
-                    <p class="text-xs text-slate-400">Turn on Wi-Fi & receive stream</p>
+                    <p class="text-xs text-slate-400">Enter PIN & receive stream</p>
                 </div>
             </button>
         </div>
@@ -97,11 +99,11 @@
                 <i data-lucide="wifi" class="w-8 h-8"></i>
             </div>
             <div>
-                <h3 class="text-lg font-bold text-white">Hotspot Setup</h3>
-                <p class="text-slate-400 text-xs mt-2 leading-relaxed">Turn on your <strong>Mobile Hotspot</strong> so receiver devices can pair directly with your phone.</p>
+                <h3 class="text-lg font-bold text-white">Network Setup</h3>
+                <p class="text-slate-400 text-xs mt-2 leading-relaxed">Both devices must be on the <strong>same Wi-Fi network</strong> (or use Hotspot). Ensure internet access is available.</p>
             </div>
             <button onclick="haptic(); initializePeerAsSender();" class="w-full py-4 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-bold rounded-2xl transition shadow-lg shadow-blue-500/20 text-sm">
-                Hotspot Active & Generate PIN
+                Ready — Generate PIN
             </button>
         </div>
 
@@ -114,11 +116,11 @@
                 <i data-lucide="smartphone" class="w-8 h-8"></i>
             </div>
             <div>
-                <h3 class="text-lg font-bold text-white">Connect Wi-Fi</h3>
-                <p class="text-slate-400 text-xs mt-2 leading-relaxed">Ensure Wi-Fi is turned on and connected to the <strong>Sender's Mobile Hotspot</strong>.</p>
+                <h3 class="text-lg font-bold text-white">Connect to Same Network</h3>
+                <p class="text-slate-400 text-xs mt-2 leading-relaxed">Connect to the <strong>same Wi-Fi network</strong> as the sender (or sender's Hotspot). Both devices need internet.</p>
             </div>
             <button onclick="haptic(); showReceiverPinEntry();" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-bold rounded-2xl transition shadow-lg shadow-emerald-500/20 text-sm">
-                Connected to Sender Wi-Fi
+                Connected — Enter PIN
             </button>
         </div>
 
@@ -220,7 +222,8 @@
     <script>
         lucide.createIcons();
 
-        if ('serviceWorker' in navigator) {
+        // ponytail: SW only works on http(s), not file:// in WebView
+        if ('serviceWorker' in navigator && location.protocol !== 'file:') {
             navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW registration skipped:', err));
         }
 
@@ -295,12 +298,27 @@
         }
 
         /* ================= PEERJS & PAIRING (SENDER) ================= */
+        let peerOpenTimeout = null;
+
         function initializePeerAsSender() {
             showStage('stage-sender-pin');
             document.getElementById('my-pin').textContent = myPin;
-            document.getElementById('status-badge').innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Broker Ready`;
+            document.getElementById('status-badge').innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Connecting to broker...`;
 
             peer = new Peer(APP_PREFIX + myPin);
+
+            // BUG 6 fix: 30s timeout for broker connection
+            peerOpenTimeout = setTimeout(() => {
+                if (!peer || peer.disconnected) {
+                    alert('Could not reach the signaling server. Make sure this device has internet access.');
+                    resetApp();
+                }
+            }, 30000);
+
+            peer.on('open', () => {
+                clearTimeout(peerOpenTimeout);
+                document.getElementById('status-badge').innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Broker Ready`;
+            });
 
             peer.on('connection', (conn) => {
                 if (activeConnection) {
@@ -308,12 +326,20 @@
                     return;
                 }
                 activeConnection = conn;
-                conn.serialization = 'none';
+                // BUG 2 fix: removed dead serialization assignment (determined by connecting peer)
                 setupConnectionHandlers();
             });
 
             peer.on('error', (err) => {
-                alert("Connection Error: " + err.message);
+                clearTimeout(peerOpenTimeout);
+                // BUG 7 fix: auto-regenerate PIN on collision
+                if (err.type === 'unavailable-id') {
+                    myPin = Math.floor(1000 + Math.random() * 9000).toString();
+                    if (peer) { try { peer.destroy(); } catch(e){} }
+                    initializePeerAsSender();
+                    return;
+                }
+                alert('Connection Error: ' + err.message);
             });
         }
 
@@ -333,14 +359,25 @@
             }
 
             peer = new Peer();
+
+            // BUG 6 fix: 30s timeout
+            const connTimeout = setTimeout(() => {
+                alert('Could not reach signaling server. Make sure this device has internet access.');
+                btnPair.disabled = false;
+                inputPin.disabled = false;
+                btnPair.innerHTML = `<i data-lucide="link-2" class="w-5 h-5"></i> Pair Devices`;
+                lucide.createIcons();
+            }, 30000);
             
             peer.on('open', () => {
-                activeConnection = peer.connect(APP_PREFIX + targetPin, { serialization: 'none' });
+                clearTimeout(connTimeout);
+                activeConnection = peer.connect(APP_PREFIX + targetPin, { serialization: 'none', reliable: true });
                 setupConnectionHandlers();
             });
 
             peer.on('error', (err) => {
-                alert("Pairing Error: Could not connect to PIN " + targetPin + " (" + err.message + ")");
+                clearTimeout(connTimeout);
+                alert('Pairing Error: Could not connect to PIN ' + targetPin + ' (' + err.message + ')');
                 btnPair.disabled = false;
                 inputPin.disabled = false;
                 btnPair.innerHTML = `<i data-lucide="link-2" class="w-5 h-5"></i> Pair Devices`;
@@ -349,6 +386,8 @@
         }
 
         /* ================= WEBRTC HANDLERS ================= */
+        // BUG 4 fix: use PeerJS API consistently (conn.send / conn.on('data'))
+        // BUG 3 fix: dataChannel guard for bufferedAmountLowThreshold setup
         function setupConnectionHandlers() {
             activeConnection.on('open', () => {
                 document.getElementById('status-badge').innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></span> Paired`;
@@ -361,24 +400,31 @@
                 if (role === 'receiver') {
                     showStage('stage-transfer');
                     document.getElementById('receiver-waiting').classList.remove('hidden');
-                    activeConnection.dataChannel.addEventListener('message', handleNativeDataChannelMessage);
                 } 
                 else if (role === 'sender') {
                     showStage('stage-transfer');
                     document.getElementById('transfer-file-selector').classList.remove('hidden');
-                    activeConnection.dataChannel.addEventListener('message', handleSenderNativeMessage);
                 }
                 
                 requestWakeLock();
             });
 
+            // BUG 4 fix: unified data handler via PeerJS 'data' event
+            activeConnection.on('data', (data) => {
+                if (role === 'sender') {
+                    handleIncomingData(data);
+                } else if (role === 'receiver') {
+                    handleIncomingData(data);
+                }
+            });
+
             activeConnection.on('error', (err) => {
-                alert("Connection failed. Check network or hotspot settings.");
+                alert('Connection failed. Check that both devices are on the same network with internet.');
                 resetApp();
             });
 
             activeConnection.on('close', () => {
-                alert("Connection closed by remote device.");
+                alert('Connection closed by remote device.');
                 resetApp();
             });
         }
@@ -459,6 +505,28 @@
             });
         }
 
+        /* ================= UNIFIED DATA HANDLER ================= */
+        // BUG 4 fix: single handler for both roles, dispatches by data type
+        function handleIncomingData(data) {
+            if (typeof data === 'string') {
+                try {
+                    const msg = JSON.parse(data);
+                    if (msg.type === 'meta' && role === 'receiver') {
+                        handleReceiverMeta(msg.data);
+                    } else if (msg.type === 'ready' && role === 'sender') {
+                        if (fileMeta.size === 0) { completeSenderUI(); return; }
+                        startSpeedTracker();
+                        sendFileInChunks();
+                    }
+                } catch(e){}
+                return;
+            }
+            // Binary data — only receiver handles this
+            if (role === 'receiver') {
+                handleReceiverBinaryChunk(data);
+            }
+        }
+
         /* ================= SENDING LOGIC ================= */
         function handleFileSelect(event) {
             fileToSend = event.target.files ? event.target.files[0] : null;
@@ -472,37 +540,24 @@
             document.getElementById('transfer-filename').textContent = fileMeta.name;
             document.getElementById('transfer-status').textContent = 'Waiting for receiver...';
             
-            activeConnection.dataChannel.send(JSON.stringify({ type: 'meta', data: fileMeta }));
-        }
-
-        function handleSenderNativeMessage(event) {
-            if (typeof event.data === 'string') {
-                try {
-                    const msg = JSON.parse(event.data);
-                    if (msg.type === 'ready') {
-                        if (fileMeta.size === 0) {
-                            completeSenderUI();
-                            return;
-                        }
-                        startSpeedTracker();
-                        sendFileInChunks();
-                    }
-                } catch(e){}
-            }
+            // BUG 4 fix: use PeerJS send() not raw dataChannel.send()
+            activeConnection.send(JSON.stringify({ type: 'meta', data: fileMeta }));
         }
 
         function sendFileInChunks() {
             document.getElementById('transfer-status').textContent = 'Streaming data over WebRTC...';
             senderOffsetTracker = 0;
             const reader = new FileReader();
-            const nativeDataChannel = activeConnection.dataChannel;
+            // ponytail: still use native dataChannel for binary sends (PeerJS send() would serialize)
+            // With serialization:'none', conn.send() passes through to dataChannel anyway
+            const dc = activeConnection.dataChannel || activeConnection._dc;
 
             reader.onload = (e) => {
                 const chunk = e.target.result;
                 try {
-                    nativeDataChannel.send(chunk);
+                    if (dc) { dc.send(chunk); } else { activeConnection.send(chunk); }
                 } catch (err) {
-                    console.error("Buffer overflow:", err);
+                    console.error('Buffer overflow:', err);
                     return;
                 }
                 
@@ -517,12 +572,13 @@
             };
 
             function readNextChunk() {
-                if (nativeDataChannel.bufferedAmount > 1024 * 1024 * 2) { 
+                const channel = dc || activeConnection.dataChannel;
+                if (channel && channel.bufferedAmount > 1024 * 1024 * 2) { 
                     const onLow = () => {
-                        nativeDataChannel.removeEventListener('bufferedamountlow', onLow);
+                        channel.removeEventListener('bufferedamountlow', onLow);
                         readSlice();
                     };
-                    nativeDataChannel.addEventListener('bufferedamountlow', onLow);
+                    channel.addEventListener('bufferedamountlow', onLow);
                 } else {
                     readSlice();
                 }
@@ -541,45 +597,39 @@
             document.getElementById('transfer-status').textContent = 'Transfer Complete!';
             document.getElementById('transfer-status').classList.add('text-emerald-400');
             if (speedInterval) clearInterval(speedInterval);
-            document.getElementById('transfer-speed').textContent = "Done";
+            document.getElementById('transfer-speed').textContent = 'Done';
             try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch(e){}
         }
 
         /* ================= RECEIVING LOGIC ================= */
-        async function handleNativeDataChannelMessage(event) {
-            const data = event.data;
+        // BUG 4 fix: split into meta handler and binary handler, called from unified handleIncomingData
+        async function handleReceiverMeta(meta) {
+            fileMeta = meta;
+            document.getElementById('receiver-waiting').classList.add('hidden');
+            document.getElementById('active-transfer-box').classList.remove('hidden');
+            document.getElementById('transfer-filename').textContent = fileMeta.name;
+            document.getElementById('transfer-status').textContent = 'Formatting Storage...';
             
-            if (typeof data === 'string') {
-                try {
-                    const msg = JSON.parse(data);
-                    if (msg.type === 'meta') {
-                        fileMeta = msg.data;
-                        document.getElementById('receiver-waiting').classList.add('hidden');
-                        document.getElementById('active-transfer-box').classList.remove('hidden');
-                        document.getElementById('transfer-filename').textContent = fileMeta.name;
-                        document.getElementById('transfer-status').textContent = 'Formatting Storage...';
-                        
-                        await initIndexedDB(); 
-                        
-                        receivedBytes = 0;
-                        ramBuffer = [];
-                        ramBufferSize = 0;
-                        dbChunkIndex = 0;
-                        writeQueue = Promise.resolve();
-                        
-                        activeConnection.dataChannel.send(JSON.stringify({ type: 'ready' }));
-                        
-                        if (fileMeta.size === 0) {
-                            assembleFileFromDB();
-                        } else {
-                            document.getElementById('transfer-status').textContent = 'Receiving Data...';
-                            startSpeedTracker();
-                        }
-                    }
-                } catch(e){}
-                return;
+            await initIndexedDB(); 
+            
+            receivedBytes = 0;
+            ramBuffer = [];
+            ramBufferSize = 0;
+            dbChunkIndex = 0;
+            writeQueue = Promise.resolve();
+            
+            // BUG 4 fix: use PeerJS send() not raw dataChannel.send()
+            activeConnection.send(JSON.stringify({ type: 'ready' }));
+            
+            if (fileMeta.size === 0) {
+                assembleFileFromDB();
+            } else {
+                document.getElementById('transfer-status').textContent = 'Receiving Data...';
+                startSpeedTracker();
             }
-            
+        }
+
+        function handleReceiverBinaryChunk(data) {
             ramBuffer.push(data);
             const chunkSize = data.byteLength || data.length || 0;
             ramBufferSize += chunkSize;
@@ -603,8 +653,8 @@
                 
                 const targetIdx = dbChunkIndex++;
                 queueDBStore(targetIdx, combinedArray.buffer).catch(err => {
-                    console.error("Storage failed:", err);
-                    alert("Storage Write Failed.");
+                    console.error('Storage failed:', err);
+                    alert('Storage Write Failed.');
                     resetApp();
                 });
             }
@@ -641,27 +691,30 @@
                 document.getElementById('transfer-bar').classList.add('bg-emerald-500');
                 updateTransferUI(fileMeta.size, fileMeta.size);
 
-                const downloadUrl = URL.createObjectURL(finalFile);
                 const actionContainer = document.getElementById('transfer-complete-actions');
                 actionContainer.classList.remove('hidden');
+                window.latestReceivedFile = new File([finalFile], fileMeta.name, { type: fileMeta.type });
+                window.latestReceivedBlob = finalFile;
                 
                 let shareButtonHtml = '';
-                if (navigator.canShare && navigator.canShare({ files: [new File([finalFile], fileMeta.name, { type: fileMeta.type })] })) {
-                    shareButtonHtml = `
-                        <button onclick="shareReceivedFile()" class="w-full flex items-center justify-center gap-2 px-5 py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-2xl transition shadow-lg text-sm">
-                            <i data-lucide="share-2" class="w-5 h-5"></i> Share via Apps
-                        </button>
-                    `;
-                }
+                try {
+                    if (navigator.canShare && navigator.canShare({ files: [window.latestReceivedFile] })) {
+                        shareButtonHtml = `
+                            <button onclick="shareReceivedFile()" class="w-full flex items-center justify-center gap-2 px-5 py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-2xl transition shadow-lg text-sm">
+                                <i data-lucide="share-2" class="w-5 h-5"></i> Share via Apps
+                            </button>
+                        `;
+                    }
+                } catch(e){}
 
+                // BUG 9 fix: use native AndroidBridge for saving (blob: URLs don't work in WebView)
                 actionContainer.innerHTML = `
                     ${shareButtonHtml}
-                    <a href="${downloadUrl}" download="${fileMeta.name}" class="w-full flex items-center justify-center gap-2 px-5 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-2xl transition shadow-lg text-sm">
+                    <button onclick="saveFileToPhone()" class="w-full flex items-center justify-center gap-2 px-5 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-2xl transition shadow-lg text-sm">
                         <i data-lucide="download" class="w-5 h-5"></i> Save File to Phone
-                    </a>
+                    </button>
                 `;
                 lucide.createIcons();
-                window.latestReceivedFile = new File([finalFile], fileMeta.name, { type: fileMeta.type });
                 
                 try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch(e){}
 
@@ -682,6 +735,34 @@
                     });
                 } catch(e){}
             }
+        }
+
+        // BUG 9 fix: save file via native Android bridge or fallback to blob download
+        function saveFileToPhone() {
+            haptic();
+            if (!window.latestReceivedBlob) { alert('No file to save'); return; }
+
+            // Native Android bridge path
+            if (window.AndroidBridge && window.AndroidBridge.saveBase64File) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    // Strip data URL prefix to get pure base64
+                    const base64 = reader.result.split(',')[1];
+                    window.AndroidBridge.saveBase64File(base64, fileMeta.name, fileMeta.type || 'application/octet-stream');
+                };
+                reader.readAsDataURL(window.latestReceivedBlob);
+                return;
+            }
+
+            // Web browser fallback — blob: URL download
+            const url = URL.createObjectURL(window.latestReceivedBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileMeta.name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
         }
 
         /* ================= DRAG & DROP ================= */
