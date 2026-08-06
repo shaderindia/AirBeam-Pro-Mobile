@@ -1,0 +1,2 @@
+rootProject.name = "AirBeam Pro"
+include ':app'
