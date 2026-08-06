@@ -17,6 +17,13 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
+import android.os.ParcelFileDescriptor;
+import android.content.ContentValues;
+import android.provider.MediaStore;
+import android.util.Base64;
+import java.io.OutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -128,19 +135,48 @@ public class MainActivity extends AppCompatActivity {
             runOnUiThread(() -> {
                 try {
                     WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-                    if (wifiManager != null && !wifiManager.isWifiEnabled()) {
-                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                            wifiManager.setWifiEnabled(true);
-                            Toast.makeText(MainActivity.this, "Enabling Wi-Fi...", Toast.LENGTH_SHORT).show();
-                        } else {
-                            Intent intent = new Intent(Settings.ACTION_WIFI_SETTINGS);
-                            startActivity(intent);
-                            Toast.makeText(MainActivity.this, "Opening Wi-Fi Settings...", Toast.LENGTH_SHORT).show();
-                        }
+                    if (wifiManager != null && !wifiManager.isWifiEnabled() && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                        wifiManager.setWifiEnabled(true);
                     }
-                } catch (Exception e) {
+                    // Always open Wi-Fi settings so user can pick the sender's hotspot
                     Intent intent = new Intent(Settings.ACTION_WIFI_SETTINGS);
                     startActivity(intent);
+                    Toast.makeText(MainActivity.this, "Connect to sender's hotspot network", Toast.LENGTH_LONG).show();
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Open Wi-Fi settings manually", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void saveBase64File(String base64Data, String fileName, String mimeType) {
+            runOnUiThread(() -> {
+                try {
+                    byte[] data = Base64.decode(base64Data, Base64.DEFAULT);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        ContentValues values = new ContentValues();
+                        values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
+                        values.put(MediaStore.Downloads.MIME_TYPE, mimeType);
+                        values.put(MediaStore.Downloads.IS_PENDING, 1);
+                        Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                        if (uri != null) {
+                            OutputStream os = getContentResolver().openOutputStream(uri);
+                            os.write(data);
+                            os.close();
+                            values.clear();
+                            values.put(MediaStore.Downloads.IS_PENDING, 0);
+                            getContentResolver().update(uri, values, null, null);
+                        }
+                    } else {
+                        File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                        File file = new File(dir, fileName);
+                        FileOutputStream fos = new FileOutputStream(file);
+                        fos.write(data);
+                        fos.close();
+                    }
+                    Toast.makeText(MainActivity.this, "Saved: " + fileName, Toast.LENGTH_LONG).show();
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 }
             });
         }
