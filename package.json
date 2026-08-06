@@ -1,0 +1,27 @@
+{
+  "name": "airbeam-pro-mobile",
+  "version": "1.0.0",
+  "description": "AirBeam Pro Mobile App - Native P2P Offline File Sharing",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve .",
+    "build": "echo 'Web assets ready for Capacitor'",
+    "cap:sync": "npx cap sync",
+    "cap:open:android": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^5.7.0",
+    "@capacitor/core": "^5.7.0",
+    "@capacitor/cli": "^5.7.0"
+  },
+  "keywords": [
+    "airbeam-pro",
+    "p2p-file-share",
+    "webrtc",
+    "android",
+    "mobile-app",
+    "peerjs"
+  ],
+  "author": "Shader7 (Nishikant Xalxo)",
+  "license": "MIT"
+}
