@@ -40,13 +40,11 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-blue-500 selection:text-white">
 
-    <!-- Mobile Header -->
+    <!-- Mobile Header with Logo -->
     <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-50 px-4 py-3">
         <div class="max-w-md mx-auto flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <div class="p-2 bg-blue-600/20 text-blue-400 rounded-xl border border-blue-500/30 shadow-inner">
-                    <i data-lucide="zap" class="w-6 h-6"></i>
-                </div>
+                <img src="icons/icon-192.png" alt="AirBeam Pro Logo" class="w-9 h-9 rounded-xl object-cover border border-blue-500/40 shadow-md">
                 <div>
                     <h1 class="font-black text-lg leading-none text-white tracking-tight">AirBeam Mobile</h1>
                     <p class="text-[10px] uppercase font-bold text-blue-400 tracking-wider mt-0.5">P2P Direct Transfer</p>
@@ -64,8 +62,9 @@
         <!-- Stage 1: Action Selection -->
         <div id="stage-role" class="space-y-4">
             <div class="text-center mb-6">
-                <h2 class="text-2xl font-black text-white tracking-tight">Share Files Directly</h2>
-                <p class="text-xs text-slate-400 mt-1">High-speed P2P file bridge between mobile devices</p>
+                <img src="icons/icon-512.png" alt="Logo" class="w-20 h-20 mx-auto mb-4 rounded-2xl shadow-xl border border-blue-500/30 object-cover">
+                <h2 class="text-2xl font-black text-white tracking-tight">AirBeam Pro P2P</h2>
+                <p class="text-xs text-slate-400 mt-1">High-speed file bridge between mobile devices</p>
             </div>
             
             <button onclick="haptic(); startSenderFlow();" class="w-full flex items-center gap-4 p-5 bg-gradient-to-r from-slate-900 to-slate-900/90 border border-slate-800 hover:border-blue-500 rounded-2xl transition active:scale-[0.98] shadow-lg group">
@@ -74,7 +73,7 @@
                 </div>
                 <div class="text-left">
                     <h3 class="font-bold text-white text-base">Send Files</h3>
-                    <p class="text-xs text-slate-400">Generate a PIN & host transfer</p>
+                    <p class="text-xs text-slate-400">Turn on Hotspot & host transfer</p>
                 </div>
             </button>
 
@@ -84,7 +83,7 @@
                 </div>
                 <div class="text-left">
                     <h3 class="font-bold text-white text-base">Receive Files</h3>
-                    <p class="text-xs text-slate-400">Enter PIN & receive data stream</p>
+                    <p class="text-xs text-slate-400">Turn on Wi-Fi & receive stream</p>
                 </div>
             </button>
         </div>
@@ -98,11 +97,11 @@
                 <i data-lucide="wifi" class="w-8 h-8"></i>
             </div>
             <div>
-                <h3 class="text-lg font-bold text-white">Network Check</h3>
-                <p class="text-slate-400 text-xs mt-2 leading-relaxed">Turn on your <strong>Mobile Hotspot</strong> or connect both phones to the same Wi-Fi network for maximum transfer speed.</p>
+                <h3 class="text-lg font-bold text-white">Hotspot Setup</h3>
+                <p class="text-slate-400 text-xs mt-2 leading-relaxed">Turn on your <strong>Mobile Hotspot</strong> so receiver devices can pair directly with your phone.</p>
             </div>
             <button onclick="haptic(); initializePeerAsSender();" class="w-full py-4 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-bold rounded-2xl transition shadow-lg shadow-blue-500/20 text-sm">
-                Network Ready & Continue
+                Hotspot Active & Generate PIN
             </button>
         </div>
 
@@ -115,11 +114,11 @@
                 <i data-lucide="smartphone" class="w-8 h-8"></i>
             </div>
             <div>
-                <h3 class="text-lg font-bold text-white">Connect to Sender</h3>
-                <p class="text-slate-400 text-xs mt-2 leading-relaxed">Make sure you are connected to the <strong>Sender's Hotspot</strong> or Wi-Fi network before pairing.</p>
+                <h3 class="text-lg font-bold text-white">Connect Wi-Fi</h3>
+                <p class="text-slate-400 text-xs mt-2 leading-relaxed">Ensure Wi-Fi is turned on and connected to the <strong>Sender's Mobile Hotspot</strong>.</p>
             </div>
             <button onclick="haptic(); showReceiverPinEntry();" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-bold rounded-2xl transition shadow-lg shadow-emerald-500/20 text-sm">
-                Connected & Ready
+                Connected to Sender Wi-Fi
             </button>
         </div>
 
@@ -221,12 +220,10 @@
     <script>
         lucide.createIcons();
 
-        // PWA Service Worker Registration
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW registration skipped:', err));
         }
 
-        /* ================= HAPTIC & UI UTILS ================= */
         function haptic() {
             if (navigator.vibrate) {
                 navigator.vibrate(25);
@@ -271,11 +268,19 @@
 
         function startSenderFlow() {
             role = 'sender';
+            // Force open native Android Hotspot Settings if running inside Android App
+            if (window.AndroidBridge && window.AndroidBridge.openHotspotSettings) {
+                window.AndroidBridge.openHotspotSettings();
+            }
             showStage('stage-sender-prep');
         }
 
         function startReceiverFlow() {
             role = 'receiver';
+            // Force enable Wi-Fi or open Wi-Fi Settings if running inside Android App
+            if (window.AndroidBridge && window.AndroidBridge.enableWifiOrOpenSettings) {
+                window.AndroidBridge.enableWifiOrOpenSettings();
+            }
             showStage('stage-receiver-prep');
         }
 
