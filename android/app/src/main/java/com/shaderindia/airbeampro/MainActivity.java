@@ -1,13 +1,16 @@
 package com.shaderindia.airbeampro;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
+import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -18,7 +21,6 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 public class MainActivity extends AppCompatActivity {
@@ -46,7 +48,6 @@ public class MainActivity extends AppCompatActivity {
             swipeRefresh.setRefreshing(false);
         });
 
-        // Load AirBeam Pro web app (assets or web)
         webView.loadUrl("file:///android_asset/index.html");
     }
 
@@ -60,6 +61,9 @@ public class MainActivity extends AppCompatActivity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+
+        // Native JavaScript Bridge Interface
+        webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -77,7 +81,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Native Android File Chooser support for input[type=file]
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
@@ -97,6 +100,50 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
         });
+    }
+
+    public class AndroidBridge {
+        @JavascriptInterface
+        public void openHotspotSettings() {
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent();
+                    intent.setClassName("com.android.settings", "com.android.settings.TetherSettings");
+                    startActivity(intent);
+                } catch (Exception e1) {
+                    try {
+                        Intent intent = new Intent(Settings.ACTION_WIRELESS_SETTINGS);
+                        startActivity(intent);
+                    } catch (Exception e2) {
+                        Intent intent = new Intent(Settings.ACTION_SETTINGS);
+                        startActivity(intent);
+                    }
+                }
+                Toast.makeText(MainActivity.this, "Opening Hotspot / Tethering Settings...", Toast.LENGTH_LONG).show();
+            });
+        }
+
+        @JavascriptInterface
+        public void enableWifiOrOpenSettings() {
+            runOnUiThread(() -> {
+                try {
+                    WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                    if (wifiManager != null && !wifiManager.isWifiEnabled()) {
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                            wifiManager.setWifiEnabled(true);
+                            Toast.makeText(MainActivity.this, "Enabling Wi-Fi...", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Intent intent = new Intent(Settings.ACTION_WIFI_SETTINGS);
+                            startActivity(intent);
+                            Toast.makeText(MainActivity.this, "Opening Wi-Fi Settings...", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                } catch (Exception e) {
+                    Intent intent = new Intent(Settings.ACTION_WIFI_SETTINGS);
+                    startActivity(intent);
+                }
+            });
+        }
     }
 
     private void setupPermissions() {
